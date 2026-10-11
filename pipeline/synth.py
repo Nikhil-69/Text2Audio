@@ -92,6 +92,10 @@ class BaseSynthesizer:
                 para_audios.append(joined)
         return concat_with_gaps(para_audios, gap_seconds=PARAGRAPH_GAP)
 
+    def release_memory(self) -> None:
+        """Hand cached memory back to the OS (call between long jobs/items)."""
+        free_memory()
+
     def preview(self, text: str = "This is a sample of the selected narrator voice.") -> np.ndarray:
         return self.synth_chunk(text)
 
@@ -109,6 +113,24 @@ class Synthesizer(BaseSynthesizer):
     def synth_chunk(self, text: str) -> np.ndarray:
         parts = [audio for _, _, audio in self.pipeline(text, voice=self.voice, speed=self.speed)]
         return concat_with_gaps(parts, gap_seconds=0.0)
+
+
+def free_memory() -> None:
+    """Run the GC and flush torch's device allocator caches, if torch is loaded."""
+    import gc
+    import sys
+    gc.collect()
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        mps = getattr(torch, "mps", None)
+        if mps is not None and torch.backends.mps.is_available():
+            mps.empty_cache()
+    except Exception:
+        pass
 
 
 def select_device() -> str:

@@ -479,6 +479,11 @@ def synthesize_batch(store: BatchStore, bid: str, *, emit, synth_factory, custom
                 store.save(state)
                 raise
             store.save(state)
+            # Don't let 50 finished novels pile up in RAM: drop this item's text
+            # and flush the synthesizer / torch allocator before the next one.
+            texts.pop(it["uid"], None)
+            if hasattr(synth, "release_memory"):
+                synth.release_memory()
             emit({"type": "item", "index": it["index"], "status": it["status"],
                   "durationSeconds": it["durationSeconds"], "error": it["error"]})
     finally:
