@@ -50,10 +50,15 @@ def section_from_text(filename: str, raw: str) -> tuple[str, str]:
     if m:
         title = m.group(1).strip()
         raw = raw[:m.start()] + raw[m.end():]
+        has_h1 = True
     else:
         title = os.path.splitext(os.path.basename(filename))[0]
+        has_h1 = False
     marker = _marker_title(title)
     body = clean_markdown(raw)
+    if not has_h1:
+        # The title is only a filename; never narrate it.
+        return marker, body
     return marker, f"{_spoken_heading(marker)}\n\n{body}"
 
 

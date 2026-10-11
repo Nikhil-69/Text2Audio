@@ -1,4 +1,5 @@
 """Text2Audio Studio — FastAPI backend serving the web UI over the TTS pipeline."""
+import glob
 import io
 import importlib.util
 import os
@@ -23,7 +24,11 @@ from pydantic import BaseModel, Field
 from pipeline.synth import Synthesizer, PRESET_VOICES, SAMPLE_RATE, select_device
 from backend.library import Library, new_id
 from backend.jobs import JobManager
-from backend.render import render_audiobook, remaster, purge_wavs, retag_audio
+from backend.cleanup import acquire_instance_lock, reap_orphan_ffmpeg, remove_stale_partials
+from pipeline import procs
+from backend.batch import (BatchError, BatchStore, natural_key, synthesize_batch,
+                           merge_batch, video_batch)
+from backend.render import render_audiobook, remaster, purge_wavs, retag_audio, load_request, RenderCancelled
 from backend.pronunciations import PronunciationStore
 from backend.voices import VoiceStore
 from backend.quality import build_chapter_export, quality_report
@@ -46,6 +51,8 @@ voices = VoiceStore(VOICES_DIR)
 cache = ChunkCache(os.environ.get("T2A_CACHE_DIR",
                    os.path.join(os.path.dirname(LIBRARY_DIR), "data", "chunk-cache")),
                    max_bytes=int(os.environ.get("T2A_CACHE_MAX_BYTES", str(5 * 1024**3))))
+batches = BatchStore(os.environ.get("T2A_BATCH_DIR", os.path.join(os.path.dirname(LIBRARY_DIR), "batches")))
+DATA_DIR = os.path.dirname(LIBRARY_DIR) + os.sep + "data"
 jobs = JobManager()
 _render_lock = threading.Lock()      # one GPU render at a time
 _maintenance_lock = threading.Lock()
@@ -120,7 +127,19 @@ async def lifespan(app: FastAPI):
     app.state.ffmpeg_ok = shutil.which("ffmpeg") is not None
     if not app.state.ffmpeg_ok:
         print("WARNING: ffmpeg not found on PATH — audio assembly will fail.", file=sys.stderr)
+    procs.reset()
+    # The instance that holds the lock owns the working files. A second copy must not
+    # delete partial files (or stop encoders) that the first one is still using.
+    app.state.instance_lock = acquire_instance_lock(os.path.join(DATA_DIR, "instance.lock"))
+    if app.state.instance_lock:
+        work_dirs = [LIBRARY_DIR, batches.base]
+        stopped = reap_orphan_ffmpeg(work_dirs)
+        removed = remove_stale_partials(work_dirs)
+        if stopped or removed:
+            print(f"Cleaned up after an earlier run: stopped {stopped} orphaned ffmpeg process(es), "
+                  f"removed {removed} partial file(s).", file=sys.stderr)
     yield
+    procs.terminate_all()                 # never leave an encoder running after we exit
 
 
 app = FastAPI(title="Text2Audio Studio", lifespan=lifespan)
@@ -132,7 +151,12 @@ async def reject_cross_site_mutations(request: Request, call_next):
     if request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path.startswith("/api/"):
         origin = request.headers.get("origin")
         fetch_site = request.headers.get("sec-fetch-site", "")
-        allowed = {"http://127.0.0.1:8765", "http://localhost:8765"}
+        # Same-origin only: the page must come from this very server, on a loopback name.
+        # (Matching the request's own Host keeps this working on any port, but a page on
+        # another site, or a DNS-rebound hostname, can never match.)
+        host = request.headers.get("host", "")
+        name = host.rsplit(":", 1)[0].strip("[]") if not host.endswith("]") else host.strip("[]")
+        allowed = {f"http://{host}"} if name in {"127.0.0.1", "localhost", "::1"} else set()
         if (origin and origin.rstrip("/") not in allowed) or fetch_site == "cross-site":
             return Response(content='{"detail":"cross-site request rejected"}', status_code=403,
                             media_type="application/json")
@@ -209,6 +233,12 @@ def _launch_render(req: RenderRequest, cover_data: bytes | None = None):
                              library=library, job_id=job_id, emit=emit,
                              synth_factory=SYNTH_FACTORY, custom_rules=pron.get_all(),
                              cancelled=lambda: jobs.is_cancelled(job_id), chunk_cache=cache)
+        except RenderCancelled:
+            raise
+        except Exception as exc:
+            if job_id in library.incomplete():
+                raise RuntimeError(f"{exc} (progress saved - use Resume to continue)") from exc
+            raise
         finally:
             _render_lock.release()
 
@@ -219,6 +249,400 @@ def _launch_render(req: RenderRequest, cover_data: bytes | None = None):
         library.delete(job_id)
         raise
     return {"jobId": job_id}
+
+
+@app.get("/api/incomplete")
+def incomplete_renders():
+    """Renders that crashed mid-way and can be resumed from their saved audio."""
+    items = []
+    for job_id in library.incomplete():
+        req = load_request(library, job_id)
+        if req is None:
+            continue
+        wavs = len(glob.glob(os.path.join(LIBRARY_DIR, job_id, "wav", "chapter_*.wav"))) \
+            - len(glob.glob(os.path.join(LIBRARY_DIR, job_id, "wav", "*.part.wav")))
+        items.append({"id": job_id, "title": req.get("title") or "Audiobook",
+                      "chaptersDone": max(0, wavs)})
+    return {"items": items}
+
+
+@app.post("/api/render/{job_id}/resume")
+def resume_render(job_id: str):
+    _check_id(job_id)
+    req = load_request(library, job_id)
+    if req is None:
+        raise HTTPException(status_code=404, detail="nothing to resume")
+    if jobs.has(job_id) and not (jobs.status(job_id) or {}).get("complete", True):
+        raise HTTPException(status_code=409, detail="job is already running")
+    if not _render_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="A render is already in progress")
+    workdir = os.path.join(LIBRARY_DIR, job_id)
+    cover_path = next((p for p in (os.path.join(workdir, "_cover_upload"),
+                                   os.path.join(workdir, "cover.jpg")) if os.path.isfile(p)), None)
+
+    def target(emit):
+        try:
+            render_audiobook(book_text=req["bookText"], voice=req["voice"], speed=req["speed"],
+                             title=req.get("title", ""), author=req.get("author", ""),
+                             cover_path=cover_path, library=library, job_id=job_id, emit=emit,
+                             synth_factory=SYNTH_FACTORY, custom_rules=req.get("customRules"),
+                             cancelled=lambda: jobs.is_cancelled(job_id), chunk_cache=cache)
+        except RenderCancelled:
+            raise
+        except Exception as exc:
+            if job_id in library.incomplete():
+                raise RuntimeError(f"{exc} (progress saved - use Resume to continue)") from exc
+            raise
+        finally:
+            _render_lock.release()
+
+    try:
+        jobs.submit(job_id, target)
+    except Exception:
+        _render_lock.release()
+        raise
+    return {"jobId": job_id}
+
+
+# ---- Batch mode: one audio file per uploaded text file; merge / video of any range ----
+
+MAX_BATCH_FILES = 500
+_batch_jobs: dict[str, dict] = {}     # batch id -> {"jobId", "action"} of its running job
+
+
+class BatchPatch(BaseModel):
+    title: str | None = None
+    author: str | None = None
+    voice: str | None = None
+    speed: float | None = None
+
+
+class ItemPatch(BaseModel):
+    name: str | None = None
+    text: str | None = None
+
+
+class Selection(BaseModel):
+    """1-based file numbers. Empty/missing means 'everything that applies'."""
+    items: list[int] | None = None
+    name: str | None = None
+
+
+class MoveItem(BaseModel):
+    to: int
+
+
+class NamePatch(BaseModel):
+    name: str
+
+
+def _with_active_job(state: dict) -> dict:
+    """Tell the UI which job (if any) is running so any page can reconnect to it."""
+    active = _batch_jobs.get(state["id"])
+    status = jobs.status(active["jobId"]) if active else None
+    state["activeJob"] = active if status and not status["complete"] else None
+    return state
+
+
+def _batch_or_404(bid: str) -> dict:
+    _check_id(bid)
+    state = batches.get(bid)
+    if state is None:
+        raise HTTPException(status_code=404, detail="unknown batch")
+    return _with_active_job(state)
+
+
+def _editable(bid: str) -> dict:
+    """Edits would race with a running job that holds the batch in memory."""
+    state = _batch_or_404(bid)
+    if state["activeJob"]:
+        raise HTTPException(status_code=409, detail="Wait for (or cancel) the running job first")
+    return state
+
+
+def _edit(fn, *args, **kwargs):
+    try:
+        return _with_active_job(fn(*args, **kwargs))
+    except BatchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+async def _read_batch_files(files: list[UploadFile]) -> list[tuple[str, str]]:
+    total, items = 0, []
+    for f in sorted(files, key=lambda f: natural_key(f.filename or "")):
+        name = f.filename or "untitled.txt"
+        if not re.search(r"\.(md|txt|docx|epub|pdf)$", name, re.I):
+            continue                                  # folders contain junk (.DS_Store...)
+        data = await _read_upload(f, MAX_INGEST_BYTES * 4 - total)
+        total += len(data)
+        try:
+            text = build_book_text(document_to_sources(name, data))
+        except (ValueError, zipfile.BadZipFile, KeyError) as exc:
+            raise HTTPException(status_code=400, detail=f"could not import {name}: {exc}") from exc
+        if text.strip():
+            items.append((os.path.splitext(os.path.basename(name))[0], text))
+    if not items:
+        raise HTTPException(status_code=400, detail="no readable text files found")
+    return items
+
+
+@app.post("/api/batches")
+async def create_batch(files: list[UploadFile] = File(...), title: str = Form(""),
+                       author: str = Form(""), voice: str = Form("af_heart"),
+                       speed: float = Form(1.0)):
+    if voice not in PRESET_VOICES and voices.get(voice) is None:
+        raise HTTPException(status_code=400, detail="unknown voice")
+    if len(files) > MAX_BATCH_FILES:
+        raise HTTPException(status_code=400, detail=f"too many files (max {MAX_BATCH_FILES})")
+    items = await _read_batch_files(files)
+    return batches.create(new_id(), title=title, author=author, voice=voice,
+                          speed=max(0.5, min(1.5, speed)), items=items)
+
+
+@app.get("/api/batches")
+def list_batches():
+    return [_with_active_job(b) for b in batches.list()]
+
+
+@app.get("/api/batches/{bid}")
+def get_batch(bid: str):
+    return _batch_or_404(bid)
+
+
+@app.patch("/api/batches/{bid}")
+def update_batch(bid: str, patch: BatchPatch):
+    _editable(bid)
+    if patch.voice is not None and patch.voice not in PRESET_VOICES and voices.get(patch.voice) is None:
+        raise HTTPException(status_code=400, detail="unknown voice")
+    return _edit(batches.update_batch, bid, title=patch.title, author=patch.author,
+                 voice=patch.voice, speed=patch.speed)
+
+
+@app.delete("/api/batches/{bid}")
+def delete_batch(bid: str):
+    _editable(bid)
+    if not _render_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="A render is in progress")
+    try:
+        batches.delete(bid)
+    finally:
+        _render_lock.release()
+    return {"deleted": bid}
+
+
+@app.post("/api/batches/{bid}/files")
+async def add_batch_files(bid: str, files: list[UploadFile] = File(...)):
+    """Append more files to the end of an existing batch."""
+    state = _editable(bid)
+    if len(state["items"]) + len(files) > MAX_BATCH_FILES:
+        raise HTTPException(status_code=400, detail=f"too many files (max {MAX_BATCH_FILES})")
+    return _with_active_job(batches.add_items(bid, await _read_batch_files(files)))
+
+
+# -- individual files (addressed by their current 1-based number) --
+
+@app.get("/api/batches/{bid}/items/{index}/text")
+def get_item_text(bid: str, index: int):
+    _batch_or_404(bid)
+    try:
+        return {"text": batches.read_text(bid, index)}
+    except BatchError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.patch("/api/batches/{bid}/items/{index}")
+def update_item(bid: str, index: int, patch: ItemPatch):
+    """Rename a file or replace its text (which discards its audio)."""
+    _editable(bid)
+    return _edit(batches.update_item, bid, index, name=patch.name, text=patch.text)
+
+
+@app.post("/api/batches/{bid}/items/{index}/move")
+def move_item(bid: str, index: int, move: MoveItem):
+    _editable(bid)
+    return _edit(batches.move_item, bid, index, move.to)
+
+
+@app.post("/api/batches/{bid}/items/delete")
+def delete_items(bid: str, sel: Selection):
+    _editable(bid)
+    return _edit(batches.delete_items, bid, sel.items or [])
+
+
+@app.post("/api/batches/{bid}/items/reset")
+def reset_items(bid: str, sel: Selection):
+    """Discard audio of the chosen files so they can be generated again."""
+    _editable(bid)
+    return _edit(batches.reset_items, bid, sel.items or [])
+
+
+@app.get("/api/batches/{bid}/item/{index}/audio")
+def batch_item_audio(bid: str, index: int):
+    state = _batch_or_404(bid)
+    item = next((i for i in state["items"] if i["index"] == index and i["status"] == "done"), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="audio not ready")
+    return FileResponse(batches.item_file(bid, item, "m4a"), media_type="audio/mp4",
+                        filename=f"{index:03d} - {item['name']}.m4a")
+
+
+# -- video background image (one per batch; used by every video made from it) --
+
+@app.get("/api/batches/{bid}/cover")
+def get_batch_cover(bid: str):
+    _batch_or_404(bid)
+    path = batches.cover_file(bid)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="no image")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
+
+
+# Several images: a video shows them one after another, each for an equal share of its length.
+
+@app.get("/api/batches/{bid}/images")
+def list_batch_images(bid: str):
+    _batch_or_404(bid)
+    return {"images": batches.image_ids(bid)}
+
+
+@app.get("/api/batches/{bid}/images/{image_id}")
+def get_batch_image(bid: str, image_id: str):
+    _batch_or_404(bid)
+    try:
+        path = batches.image_file(bid, image_id)
+    except BatchError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="no image")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/batches/{bid}/images")
+async def add_batch_images(bid: str, images: list[UploadFile] = File(...)):
+    _batch_or_404(bid)
+    if len(images) > 50:
+        raise HTTPException(status_code=400, detail="too many images (max 50 at a time)")
+    for image in sorted(images, key=lambda f: natural_key(f.filename or "")):
+        data = await _read_upload(image, MAX_COVER_BYTES)
+        try:
+            batches.add_image(bid, data)
+        except BatchError as exc:
+            raise HTTPException(status_code=400, detail=f"{image.filename}: {exc}") from exc
+    return {"images": batches.image_ids(bid)}
+
+
+@app.delete("/api/batches/{bid}/images/{image_id}")
+def delete_batch_image(bid: str, image_id: str):
+    _batch_or_404(bid)
+    try:
+        batches.remove_image(bid, image_id)
+    except BatchError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"images": batches.image_ids(bid)}
+
+
+@app.post("/api/batches/{bid}/cover")
+async def set_batch_cover(bid: str, image: UploadFile = File(...)):
+    _batch_or_404(bid)
+    data = await _read_upload(image, MAX_COVER_BYTES)
+    try:
+        batches.set_cover(bid, data)
+    except BatchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"cover": True}
+
+
+@app.delete("/api/batches/{bid}/cover")
+def delete_batch_cover(bid: str):
+    _batch_or_404(bid)
+    batches.remove_cover(bid)
+    return {"cover": False}
+
+
+# -- jobs --
+
+def _launch_batch_job(bid: str, run, action: str):
+    """Run run(emit, job_id) in the background under the one-render-at-a-time lock."""
+    if not _render_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="A render is already in progress")
+    job_id = new_id()
+
+    def target(emit):
+        try:
+            run(emit, job_id)
+        finally:
+            _render_lock.release()
+
+    _batch_jobs[bid] = {"jobId": job_id, "action": action}
+    try:
+        jobs.submit(job_id, target)
+    except Exception:
+        _render_lock.release()
+        raise
+    return {"jobId": job_id}
+
+
+@app.post("/api/batches/{bid}/synthesize")
+def batch_synthesize(bid: str, sel: Selection | None = None):
+    """Generate audio for files not finished yet (all, or only the chosen ones)."""
+    _editable(bid)
+    only = (sel.items if sel else None) or None
+    return _launch_batch_job(bid, lambda emit, job_id: synthesize_batch(
+        batches, bid, emit=emit, synth_factory=SYNTH_FACTORY, custom_rules=pron.get_all(),
+        cancelled=lambda: jobs.is_cancelled(job_id), chunk_cache=cache, only=only), "synthesize")
+
+
+def _output_job(bid: str, sel: Selection | None, fn, action: str):
+    state = _editable(bid)
+    indexes = (sel.items if sel else None) or None
+    pool = [i for i in state["items"] if i["status"] == "done"
+            and (indexes is None or i["index"] in set(indexes))]
+    if not pool:
+        raise HTTPException(status_code=409,
+                            detail="None of the selected files have finished audio yet")
+    name = sel.name if sel else None
+    return _launch_batch_job(bid, lambda emit, job_id: fn(
+        batches, bid, emit=emit, indexes=indexes, name=name,
+        cancelled=lambda: jobs.is_cancelled(job_id)), action)
+
+
+@app.post("/api/batches/{bid}/merge")
+def batch_merge(bid: str, sel: Selection | None = None):
+    """Merge the chosen finished files (default: all finished) into one audiobook."""
+    return _output_job(bid, sel, merge_batch, "merge")
+
+
+@app.post("/api/batches/{bid}/video")
+def batch_video(bid: str, sel: Selection | None = None):
+    """Make a video of the chosen finished files (default: all finished)."""
+    return _output_job(bid, sel, video_batch, "video")
+
+
+# -- outputs: merged audiobooks and videos --
+
+@app.get("/api/batches/{bid}/outputs/{oid}")
+def download_output(bid: str, oid: str):
+    state = _batch_or_404(bid)
+    out = next((o for o in state["outputs"] if o["id"] == oid), None)
+    if out is None or not os.path.isfile(batches.output_file(bid, out)):
+        raise HTTPException(status_code=404, detail="output not found")
+    ext = "mp4" if out["kind"] == "video" else "m4b"
+    safe = re.sub(r'[\\/:*?"<>|]+', "_", out["name"]).strip() or "audiobook"
+    return FileResponse(batches.output_file(bid, out),
+                        media_type="video/mp4" if out["kind"] == "video" else "audio/mp4",
+                        filename=f"{safe}.{ext}")
+
+
+@app.patch("/api/batches/{bid}/outputs/{oid}")
+def rename_output(bid: str, oid: str, patch: NamePatch):
+    _editable(bid)
+    return _edit(batches.rename_output, bid, oid, patch.name)
+
+
+@app.delete("/api/batches/{bid}/outputs/{oid}")
+def delete_output(bid: str, oid: str):
+    _editable(bid)
+    return _edit(batches.delete_output, bid, oid)
 
 
 @app.post("/api/render")

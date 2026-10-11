@@ -12,3 +12,10 @@ library/
 data/
 voices/
 docs/superpowers/
+
+# Batch-mode working files
+/batches/
+
+# Built desktop app bundle
+/dist/
+.DS_Store

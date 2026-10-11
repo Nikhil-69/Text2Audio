@@ -158,7 +158,8 @@ def test_render_aborts_on_fatal_synth_error(tmp_path):
                          cover_path=None, library=lib, job_id="jd", emit=lambda e: None,
                          synth_factory=lambda vid, sp: DeadSynth(vid, sp))
     assert closed["v"] is True       # closed even on failure (finally)
-    assert lib.get("jd") is None     # partial workdir cleaned up
+    assert lib.get("jd") is None     # no manifest: not listed as a finished book
+    assert lib.incomplete() == ["jd"]  # but its saved work is kept for Resume
 
 
 def test_real_chunk_interface_streams_progress_and_uses_cache(tmp_path):
@@ -199,3 +200,36 @@ def test_cancelled_render_removes_partial_work(tmp_path):
                          job_id="cancelled", emit=lambda e: None,
                          synth_factory=FakeSynth, cancelled=lambda: True)
     assert lib.get("cancelled") is None
+
+
+def test_crash_keeps_finished_chapters_and_resume_skips_them(tmp_path):
+    from backend.render import load_request
+    lib = Library(str(tmp_path))
+    book = "## Chapter 1 - One\nHello there.\n\n## Chapter 2 - Two\nWorld here."
+    calls = []
+
+    class CrashOnSecond(FakeSynth):
+        def synth_paragraphs(self, paragraphs, progress=None):
+            calls.append(1)
+            if len(calls) == 2:
+                raise RuntimeError("boom")
+            return super().synth_paragraphs(paragraphs, progress)
+
+    kwargs = dict(book_text=book, voice="bm_george", speed=1.0, title="T", author="",
+                  cover_path=None, library=lib, job_id="jobx", emit=lambda e: None)
+    try:
+        render_audiobook(synth_factory=CrashOnSecond, **kwargs)
+        assert False, "expected crash"
+    except RuntimeError:
+        pass
+
+    assert os.path.isfile(tmp_path / "jobx" / "wav" / "chapter_001.wav")
+    assert not os.path.isfile(tmp_path / "jobx" / "wav" / "chapter_002.wav")
+    assert lib.incomplete() == ["jobx"]
+    assert load_request(lib, "jobx")["bookText"] == book
+
+    calls.clear()
+    manifest = render_audiobook(synth_factory=CrashOnSecond, **kwargs)
+    assert len(calls) == 1          # only chapter 2 was re-synthesized
+    assert len(manifest["chapters"]) == 2
+    assert lib.incomplete() == []

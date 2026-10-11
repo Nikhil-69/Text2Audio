@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+from pipeline import procs
 import uuid
 
 import soundfile as sf
@@ -70,7 +71,7 @@ class VoiceStore:
             f.write(audio_bytes)
         out = self.ref_path(vid)
         try:
-            subprocess.run(["ffmpeg", "-y", "-i", src, "-ac", "1", "-ar", "24000", out],
+            procs.run(["ffmpeg", "-y", "-i", src, "-ac", "1", "-ar", "24000", out],
                            check=True, capture_output=True)
         except subprocess.CalledProcessError as exc:
             shutil.rmtree(d, ignore_errors=True)

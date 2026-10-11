@@ -26,6 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 clone = ["f5-tts>=1.1,<2"]
 classic = ["gradio>=4,<7"]
+desktop = ["pywebview>=5"]
 
 [project.urls]
 Homepage = "https://github.com/mooja77/Text2Audio"
@@ -34,5 +35,8 @@ Repository = "https://github.com/mooja77/Text2Audio"
 [project.scripts]
 text2audio = "server:main"
 
+[project.gui-scripts]
+text2audio-desktop = "desktop:main"
+
 [tool.hatch.build.targets.wheel]
-include = ["server.py", "app.py", "md_to_book.py", "pipeline", "backend", "web", "samples", "assets"]
+include = ["server.py", "desktop.py", "app.py", "md_to_book.py", "pipeline", "backend", "web", "samples", "assets"]

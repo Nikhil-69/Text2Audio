@@ -38,7 +38,7 @@ def test_delete_removes_dir(tmp_path):
 
 def test_audio_and_cover_paths(tmp_path):
     lib = Library(str(tmp_path)); d = lib.new_dir("y")
-    assert lib.audio_path("y").replace("\\", "/").endswith("y/book.m4b")
+    assert lib.audio_path("y").replace("\\", "/").endswith("y/book.mp4")
     # cover_path returns None until a cover.jpg exists
     assert lib.cover_path("y") is None
     open(lib.audio_path("y"), "wb").close()  # touch to ensure dir works

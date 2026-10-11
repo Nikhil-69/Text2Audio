@@ -3,12 +3,13 @@ import json
 import os
 import re
 import subprocess
+from pipeline import procs
 import tempfile
 import zipfile
 
 
 def _run(args):
-    return subprocess.run(args, check=True, capture_output=True, text=True)
+    return procs.run(args, check=True, capture_output=True, text=True)
 
 
 def inspect_audio(path: str) -> dict:
@@ -16,7 +17,7 @@ def inspect_audio(path: str) -> dict:
                   "-of", "json", path])
     payload = json.loads(probe.stdout)
     audio = next((s for s in payload.get("streams", []) if s.get("codec_type") == "audio"), {})
-    measured = subprocess.run(
+    measured = procs.run(
         ["ffmpeg", "-hide_banner", "-i", path, "-af", "volumedetect", "-f", "null", "-"],
         capture_output=True, text=True)
     text = measured.stderr

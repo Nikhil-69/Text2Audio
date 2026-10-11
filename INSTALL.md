@@ -6,6 +6,16 @@ no command-line knowledge needed. If you're comfortable with a terminal, the
 
 ---
 
+## On a Mac
+
+Download and unzip the project, then double-click **`Install Text2Audio.command`**
+(right-click → **Open** the first time, since it isn't signed). It installs everything
+(Python, ffmpeg, espeak-ng, the app's dependencies) and puts **Text2Audio** in your
+Applications folder. Keep the unzipped folder where it is — the app runs from it. Move it
+out of Downloads/Desktop/Documents if macOS blocks access to it.
+
+---
+
 ## 1. Download
 
 1. Go to the project page: <https://github.com/mooja77/Text2Audio>

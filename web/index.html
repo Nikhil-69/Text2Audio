@@ -10,8 +10,9 @@
   <header class="topbar">
     <div class="brand">🎧 Text2Audio <span>Studio</span></div>
     <nav class="tabs" role="tablist" aria-label="Studio sections">
+      <button class="tab active" role="tab" aria-selected="true" aria-controls="tab-batch" data-tab="batch">Batch</button>
       <button class="tab" role="tab" aria-selected="false" aria-controls="tab-library" data-tab="library">Library</button>
-      <button class="tab active" role="tab" aria-selected="true" aria-controls="tab-create" data-tab="create">Create</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="tab-create" data-tab="create">Single book</button>
       <button class="tab" role="tab" aria-selected="false" aria-controls="tab-voices" data-tab="voices">Voices</button>
       <button class="tab" role="tab" aria-selected="false" aria-controls="tab-pronounce" data-tab="pronounce">Pronounce</button>
       <button class="tab" role="tab" aria-selected="false" aria-controls="tab-help" data-tab="help">Help</button>
@@ -20,7 +21,8 @@
   </header>
 
   <main>
-    <section id="tab-create" role="tabpanel" class="tabpane active"></section>
+    <section id="tab-create" role="tabpanel" class="tabpane"></section>
+    <section id="tab-batch" role="tabpanel" class="tabpane active"></section>
     <section id="tab-voices" role="tabpanel" class="tabpane"></section>
     <section id="tab-library" role="tabpanel" class="tabpane"></section>
     <section id="tab-pronounce" role="tabpanel" class="tabpane"></section>
@@ -29,6 +31,7 @@
 
   <script src="/js/app.js"></script>
   <script src="/js/create.js"></script>
+  <script src="/js/batch.js"></script>
   <script src="/js/voices.js"></script>
   <script src="/js/library.js"></script>
   <script src="/js/player.js"></script>

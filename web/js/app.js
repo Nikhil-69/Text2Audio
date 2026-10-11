@@ -4,6 +4,15 @@ const T2A = {
     ingestVersion: 0, ingestReady: false, firstValue: false,
     activeJob: null, activeSource: null,
     renderProgress: { percent: 0, message: "Starting…" } },
+  // 4000 -> "1h 06m 40s"; drops leading zero units ("4m 05s", "12s").
+  fmtDuration(totalSeconds) {
+    const t = Math.max(0, Math.round(totalSeconds));
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+    if (h) return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+    if (m) return `${m}m ${String(s).padStart(2, "0")}s`;
+    return `${s}s`;
+  },
+
   // Escape user-controlled text before interpolating into innerHTML.
   esc(s) {
     return String(s ?? "").replace(/[&<>"']/g,
@@ -30,12 +39,13 @@ const T2A = {
       const active = p.id === "tab-" + name;
       p.classList.toggle("active", active); p.hidden = !active;
     });
+    if (name === "batch") Batch.render();
     if (name === "voices") Voices.render();
     if (name === "library") Library.render();
     if (name === "create") { Create.render(); Create.resumeActiveRender(); }
     if (name === "pronounce") Pronounce.render();
     if (name === "help") Help.render();
-    location.hash = name === "create" ? "" : name;
+    location.hash = name;
   },
 };
 
@@ -69,6 +79,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   T2A.state.activeJob = localStorage.getItem("text2audio.activeJob");
   Create.render();
   Create.resumeActiveRender();
+  if (!T2A.state.activeJob) Create.offerIncomplete();
   const initialTab = location.hash.replace(/^#/, "");
-  if (["library", "create", "voices", "pronounce", "help"].includes(initialTab)) T2A.showTab(initialTab);
+  if (["library", "create", "batch", "voices", "pronounce", "help"].includes(initialTab)) T2A.showTab(initialTab);
+  else T2A.showTab("batch");
 });

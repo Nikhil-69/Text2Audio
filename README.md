@@ -54,6 +54,20 @@ plus its local manifest is the durable first useful result.
 
 ![Getting past the Windows SmartScreen prompt: click "More info", then "Run anyway"](assets/smartscreen.png)
 
+### Desktop app (no browser)
+
+Run Studio in its own native window instead of a browser tab (it uses the system web
+view, so there is no Chrome/Firefox process):
+
+```bash
+pip install pywebview          # once
+python desktop.py              # or: text2audio-desktop
+```
+
+On macOS, `./scripts/make_mac_app.sh` builds a double-clickable `dist/Text2Audio.app`
+(keep the project outside protected folders such as Downloads or Desktop, or grant the
+app Full Disk Access, otherwise macOS blocks it from reading the project).
+
 ### Install with pip (any OS, for technical users)
 
 ```bash

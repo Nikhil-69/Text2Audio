@@ -221,6 +221,29 @@ const Create = {
     this.attachRender(jobId);
   },
 
+  async resumeRender(jobId) {
+    try {
+      await T2A.api(`/api/render/${jobId}/resume`, { method: "POST" });
+      document.getElementById("gen").disabled = true;
+      document.getElementById("pmsg").textContent = "Resuming from saved audio…";
+      localStorage.setItem("text2audio.activeJob", jobId);
+      this.attachRender(jobId);
+    } catch (e) { T2A.toast("Could not resume: " + e.message); }
+  },
+
+  // Offer to finish renders that were interrupted (crash, closed terminal, reboot).
+  async offerIncomplete() {
+    try {
+      const { items } = await T2A.api("/api/incomplete");
+      if (!items.length || T2A.state.activeJob) return;
+      const it = items[0];
+      if (confirm(`"${it.title}" was interrupted (${it.chaptersDone} chapter(s) already saved). Resume it?`)) {
+        document.getElementById("prog").hidden = false;
+        this.resumeRender(it.id);
+      }
+    } catch (_) { /* optional nicety */ }
+  },
+
   resumeActiveRender() {
     const jobId = T2A.state.activeJob || localStorage.getItem("text2audio.activeJob");
     if (!jobId || !/^[0-9a-f]{6,32}$/.test(jobId)) return;
@@ -236,7 +259,7 @@ const Create = {
     if (T2A.state.activeSource) T2A.state.activeSource.close();
     T2A.state.activeJob = jobId;
     const gen = document.getElementById("gen");
-    const t0 = Date.now();
+    let rate0 = null;
     const src = new EventSource(`/api/render/${jobId}/stream`);
     T2A.state.activeSource = src;
     src.onmessage = ev => {
@@ -244,10 +267,21 @@ const Create = {
       if (e.type === "progress") {
         document.getElementById("barf").style.width = e.percent + "%";
         document.getElementById("ppct").textContent = e.percent + "%";
-        const el = (Date.now() - t0) / 1000;
-        const eta = e.percent > 0 ? Math.round(el / e.percent * (100 - e.percent)) : 0;
+        const now = Date.now();
+        let etaText = "estimating…";
+        if (e.phase === "video") {
+          etaText = "assembling video (almost done)";
+        } else if (e.chunkCount) {
+          // Rate over chunks synthesized since this page attached (cached or
+          // already-finished chapters would otherwise make the ETA far too short).
+          if (!rate0) rate0 = { t: now, n: e.chunksDone };
+          const done = e.chunksDone - rate0.n, secs = (now - rate0.t) / 1000;
+          if (done >= 3 && secs > 0) {
+            etaText = "ETA " + T2A.fmtDuration((e.chunkCount - e.chunksDone) / (done / secs));
+          }
+        }
         document.getElementById("pmsg").textContent =
-          `Chapter ${e.chapterIndex + 1} of ${e.chapterCount} · ${e.chapterTitle} — ETA ${eta}s`;
+          `Chapter ${e.chapterIndex + 1} of ${e.chapterCount} · ${e.chapterTitle} — ${etaText}`;
         T2A.state.renderProgress = { percent: e.percent,
           message: document.getElementById("pmsg").textContent };
         document.querySelector("#prog .bar")?.setAttribute("aria-valuenow", String(e.percent));
@@ -260,7 +294,14 @@ const Create = {
         T2A.state.firstValue = true; Onboarding.complete();
         T2A.toast(resumed ? "Render recovered — audiobook ready" : "Audiobook ready"); T2A.showTab("library");
       } else if (e.type === "error") {
-        document.getElementById("pmsg").textContent = "Error: " + (e.message || "render failed");
+        const pmsg = document.getElementById("pmsg");
+        pmsg.textContent = "Error: " + (e.message || "render failed") + " ";
+        if (/Resume/.test(e.message || "")) {
+          const btn = document.createElement("button");
+          btn.type = "button"; btn.textContent = "Resume";
+          btn.onclick = () => this.resumeRender(jobId);
+          pmsg.appendChild(btn);
+        }
         src.close(); gen.disabled = false; localStorage.removeItem("text2audio.activeJob");
         T2A.state.activeJob = null; T2A.state.activeSource = null;
       }
