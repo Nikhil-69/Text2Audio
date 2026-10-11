@@ -2,7 +2,7 @@
 
 **Turn a book into a natural-sounding, chaptered audiobook — for free, fully on your own machine.**
 
-[![CI](https://github.com/mooja77/Text2Audio/actions/workflows/ci.yml/badge.svg)](https://github.com/mooja77/Text2Audio/actions/workflows/ci.yml)
+[![CI](https://github.com/Nikhil-69/Text2Audio/actions/workflows/ci.yml/badge.svg)](https://github.com/Nikhil-69/Text2Audio/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 🔊 **[Hear a sample](assets/sample.mp3)** — a short clip narrated by Text2Audio.
@@ -27,7 +27,7 @@ It runs entirely offline on your own GPU using open text-to-speech models
 
 Don't want to touch a command line? On Windows you can be up and running in three steps:
 
-1. **[Download the project as a ZIP](https://github.com/mooja77/Text2Audio/archive/refs/heads/master.zip)** and unzip it somewhere (for example, your Desktop).
+1. **[Download the project as a ZIP](https://github.com/Nikhil-69/Text2Audio/archive/refs/heads/master.zip)** and unzip it somewhere (for example, your Desktop).
 2. Double-click **`Install Text2Audio.bat`**. It sets everything up for you — Python, the app and its dependencies, ffmpeg, and espeak-ng. The first run takes a while; just let it finish.
 3. Double-click **`Start Text2Audio`** (the installer also adds a shortcut to your Desktop). Your browser opens the Studio — start making audiobooks. Keep the little black window open while you use the app; closing it stops Text2Audio.
 
@@ -45,8 +45,8 @@ plus its local manifest is the durable first useful result.
 
 - **[Searchable help and privacy guide](docs/HELP.md)**
 - **[Captioned short walkthrough with matching steps](docs/WALKTHROUGH.md)**
-- **[Ask for help](https://github.com/mooja77/Text2Audio/issues/new?template=bug_report.yml)**
-- **[Request a feature](https://github.com/mooja77/Text2Audio/issues/new?template=feature_request.yml)**
+- **[Ask for help](https://github.com/Nikhil-69/Text2Audio/issues/new?template=bug_report.yml)**
+- **[Request a feature](https://github.com/Nikhil-69/Text2Audio/issues/new?template=feature_request.yml)**
 
 > 💡 The first time you generate audio, the voice model (a few hundred MB) downloads automatically. After that, everything runs fully offline.
 >
@@ -71,14 +71,14 @@ app Full Disk Access, otherwise macOS blocks it from reading the project).
 ### Install with pip (any OS, for technical users)
 
 ```bash
-pip install git+https://github.com/mooja77/Text2Audio
+pip install git+https://github.com/Nikhil-69/Text2Audio
 text2audio
 ```
 
 Add the optional voice-cloning engine with the `clone` extra:
 
 ```bash
-pip install "text2audio[clone] @ git+https://github.com/mooja77/Text2Audio"
+pip install "text2audio[clone] @ git+https://github.com/Nikhil-69/Text2Audio"
 ```
 
 You'll still need **ffmpeg** and **espeak-ng** installed on your system, and — for GPU
@@ -126,7 +126,7 @@ speed — a CUDA build of PyTorch (`pip` pulls the CPU build by default). See
 > [INSTALL.md](INSTALL.md) instead. The steps below are the manual developer setup.
 
 ```powershell
-git clone https://github.com/mooja77/Text2Audio.git
+git clone https://github.com/Nikhil-69/Text2Audio.git
 cd Text2Audio
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1

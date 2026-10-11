@@ -18,9 +18,9 @@ out of Downloads/Desktop/Documents if macOS blocks access to it.
 
 ## 1. Download
 
-1. Go to the project page: <https://github.com/mooja77/Text2Audio>
+1. Go to the project page: <https://github.com/Nikhil-69/Text2Audio>
 2. Click the green **Code** button → **Download ZIP**
-   (or use this direct link: **[Download ZIP](https://github.com/mooja77/Text2Audio/archive/refs/heads/master.zip)**).
+   (or use this direct link: **[Download ZIP](https://github.com/Nikhil-69/Text2Audio/archive/refs/heads/master.zip)**).
 3. Find the downloaded `Text2Audio-master.zip`, right-click it → **Extract All…**, and
    pick a sensible spot like your **Desktop** or **Documents** folder.
 
@@ -171,7 +171,7 @@ The app might still be running — open your browser and go to
 Run the `.bat` from a PowerShell window so you can read the error: Shift-right-click in
 the folder → **Open PowerShell window here**, then type `.\"Start Text2Audio.bat"` and
 press Enter. Copy any error message into a
-[GitHub issue](https://github.com/mooja77/Text2Audio/issues).
+[GitHub issue](https://github.com/Nikhil-69/Text2Audio/issues).
 
 **Generation is very slow.**
 You're probably on the CPU build (no NVIDIA GPU detected). It still works, just slowly —
@@ -181,5 +181,17 @@ try a shorter chapter first, or run on a machine with an NVIDIA graphics card.
 Use the **Pronunciations** tab in the app to add a fix for tricky names, then re-generate.
 
 **Still stuck?**
-Open an issue at <https://github.com/mooja77/Text2Audio/issues> with what you tried and
+Open an issue at <https://github.com/Nikhil-69/Text2Audio/issues> with what you tried and
 any error text — we're happy to help.
+
+---
+
+## Updates
+
+Text2Audio updates itself. Each time you open the app it checks for a newer release on
+GitHub and, if there is one, installs it and restarts (your library, voices and batches are
+never touched). To turn this off, set the environment variable `T2A_NO_UPDATE=1`.
+Copies cloned with `git` are not auto-updated; use `git pull`.
+
+*Maintainers:* bump `VERSION` and `pyproject.toml`, then `git tag vX.Y.Z && git push --tags`
+to publish a release.

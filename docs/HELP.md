@@ -36,5 +36,5 @@ The server binds to `127.0.0.1`. Manuscripts, generated audio, cloned voices, an
 
 GitHub issues are public. Do not attach private manuscripts, cloned voices, copyrighted source text, or logs containing private text. Use the synthetic example or another tiny synthetic reproduction.
 
-- [Ask for help](https://github.com/mooja77/Text2Audio/issues/new?template=bug_report.yml)
-- [Request a feature](https://github.com/mooja77/Text2Audio/issues/new?template=feature_request.yml)
+- [Ask for help](https://github.com/Nikhil-69/Text2Audio/issues/new?template=bug_report.yml)
+- [Request a feature](https://github.com/Nikhil-69/Text2Audio/issues/new?template=feature_request.yml)

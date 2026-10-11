@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "text2audio"
-version = "1.3.0"
+version = "1.4.0"
 description = "Free, local, open-source audiobook studio with AI narration and voice cloning."
 readme = "README.md"
 license = { text = "MIT" }
@@ -29,8 +29,8 @@ classic = ["gradio>=4,<7"]
 desktop = ["pywebview>=5"]
 
 [project.urls]
-Homepage = "https://github.com/mooja77/Text2Audio"
-Repository = "https://github.com/mooja77/Text2Audio"
+Homepage = "https://github.com/Nikhil-69/Text2Audio"
+Repository = "https://github.com/Nikhil-69/Text2Audio"
 
 [project.scripts]
 text2audio = "server:main"

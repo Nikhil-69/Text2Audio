@@ -83,8 +83,8 @@ const Help = {
           <source src="/help/text2audio-walkthrough.mp4" type="video/mp4">
           <track default kind="captions" srclang="en" label="English" src="/help/text2audio-walkthrough.vtt">
         </video><p class="muted">Prefer text? The same five steps are in the beginner guide on Create.</p></div>
-      <div class="help-actions"><a class="btn" target="_blank" rel="noreferrer" href="https://github.com/mooja77/Text2Audio/issues/new?template=bug_report.yml">Ask for help</a>
-        <a class="btn" target="_blank" rel="noreferrer" href="https://github.com/mooja77/Text2Audio/issues/new?template=feature_request.yml">Request a feature</a></div>`;
+      <div class="help-actions"><a class="btn" target="_blank" rel="noreferrer" href="https://github.com/Nikhil-69/Text2Audio/issues/new?template=bug_report.yml">Ask for help</a>
+        <a class="btn" target="_blank" rel="noreferrer" href="https://github.com/Nikhil-69/Text2Audio/issues/new?template=feature_request.yml">Request a feature</a></div>`;
     const input = document.getElementById("help-q");
     input.oninput = () => this.filter(input.value);
     this.filter("");

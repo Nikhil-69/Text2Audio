@@ -25,6 +25,9 @@ def _healthy() -> bool:
 
 
 def main() -> int:
+    from backend import updater
+    if updater.auto_update():
+        updater.restart()                 # reload with the freshly installed code
     try:
         import webview
     except ImportError:

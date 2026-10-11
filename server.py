@@ -167,7 +167,8 @@ async def reject_cross_site_mutations(request: Request, call_next):
 def health():
     ffmpeg = shutil.which("ffmpeg")
     espeak = shutil.which("espeak-ng") or os.environ.get("PHONEMIZER_ESPEAK_PATH")
-    return {"status": "ok", "ffmpeg": bool(ffmpeg), "espeak": bool(espeak),
+    from backend.updater import current_version
+    return {"status": "ok", "version": current_version(), "ffmpeg": bool(ffmpeg), "espeak": bool(espeak),
             "libraryWritable": os.access(LIBRARY_DIR, os.W_OK),
             "voiceCloning": importlib.util.find_spec("f5_tts") is not None,
             "device": select_device(),
@@ -921,6 +922,9 @@ _mount_static()
 
 
 def main():
+    from backend import updater
+    if updater.auto_update():
+        updater.restart()                  # reload with the freshly installed code
     import uvicorn
     host, port = "127.0.0.1", 8765
     if os.environ.get("T2A_NO_BROWSER") != "1":

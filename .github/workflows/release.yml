@@ -1,0 +1,34 @@
+name: Release
+
+# Push a tag like v1.5.0 to publish a release. Installed copies of the app pick it up
+# automatically the next time they are opened.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches VERSION and pyproject.toml
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          [ "$(cat VERSION)" = "$TAG" ] || { echo "VERSION ($(cat VERSION)) != tag ($TAG)"; exit 1; }
+          grep -q "^version = \"$TAG\"" pyproject.toml || { echo "pyproject.toml version != tag"; exit 1; }
+
+      - name: Build the app zip
+        run: |
+          NAME="Text2Audio-${GITHUB_REF_NAME}"
+          git archive --format=zip --prefix="$NAME/" -o "$NAME.zip" HEAD
+          echo "ASSET=$NAME.zip" >> "$GITHUB_ENV"
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}
+          generate_release_notes: true
